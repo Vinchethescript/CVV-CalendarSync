@@ -69,15 +69,25 @@ def create_requests(day: Day):
     }
     for ev in day.agenda:
         name = ev.subject.description if ev.subject else ev.author
+        start = None
+        end = None
+        if ev.full_day:
+            start = {
+                "date": datetime_to_date(ev.start).isoformat(),
+            }
+            end = {
+                "date": datetime_to_date(ev.end).isoformat(),
+            }
+
         events.append(
             {
                 "summary": f"{event_titles[ev.type]} {name}",
                 "description": ev.notes or "",
-                "start": {
+                "start": start or {
                     "dateTime": ev.start.isoformat(),
                     "timeZone": "Europe/Rome",
                 },
-                "end": {
+                "end": end or {
                     "dateTime": ev.end.isoformat(),
                     "timeZone": "Europe/Rome",
                 },
@@ -166,21 +176,42 @@ class GoogleCalendar:
             None, partial(build, "calendar", "v3", credentials=creds)
         )
 
-    async def get_events(self, start: DateOrDatetime, end: DateOrDatetime):
+    async def get_events(self, start: DateOrDatetime, end: DateOrDatetime) -> list[dict]:
         if not self.service:
             self.service = await self.login()
 
         start = date_to_datetime(start).astimezone(tz).isoformat()
         end = date_to_datetime(end).astimezone(tz).isoformat()
 
-        return await self.exec_list(
+        max = 2500
+        data = await self.exec_list(
             "events",
             calendarId="primary",
             timeMin=start,
             timeMax=end,
+            maxResults=max,
             singleEvents=True,
             orderBy="startTime",
         )
+        items = data["items"]
+        cont = True
+        while len(items) % max == 0 and cont:
+            next_ = items[-1]["start"]["dateTime"]
+            next = gdate_to_datetime(next_).isoformat()
+            items = list(filter(lambda x: x["start"]["dateTime"] != next_, items))
+            data = await self.exec_list(
+                "events",
+                calendarId="primary",
+                timeMin=next,
+                timeMax=end,
+                maxResults=max,
+                singleEvents=True,
+                orderBy="startTime",
+            )
+            items += data["items"]
+            cont = next != end
+        
+        return items
 
     async def add_event(self, payload: dict):
         return await self.exec_insert("events", calendarId="primary", body=payload)
@@ -199,7 +230,7 @@ async def main():
 
     days = await client.me.calendar.get_day(start_date, end_date)
     days = sorted(days, key=lambda x: x.date)
-    calendar = (await gc.get_events(start_date, end_date))["items"]
+    calendar = await gc.get_events(start_date, end_date)
 
     for day in days:
         cday = filter_date(calendar, day.date)
