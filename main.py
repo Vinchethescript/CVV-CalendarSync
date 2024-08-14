@@ -1,5 +1,6 @@
 import os
 import asyncio
+import shelve
 
 from functools import partial
 from google.auth.transport.requests import Request
@@ -7,18 +8,19 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build, Resource
 from googleapiclient.errors import HttpError
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from pytz import timezone
 from aiocvv import ClassevivaClient
 from aiocvv.dataclasses import Day
 from aiocvv.enums import NoteType, EventCode
 from dotenv import load_dotenv
 from typing import Union, Optional, AsyncGenerator
-
+from appdirs import user_cache_dir
 
 load_dotenv()
 DateOrDatetime = Union[date, datetime]
 tz = timezone("Europe/Rome")
+SHELF_PATH = os.path.join(user_cache_dir(), "cvvsync.db")
 
 
 def date_to_datetime(date: DateOrDatetime, reset_hours=True) -> datetime:
@@ -172,6 +174,7 @@ class CalendarSync:
         self.__sync_loop = None
         self.__periods = None
         self.__sleep = 1800  # 30 minutes
+        self.__loop_lock = asyncio.Lock()
 
     @classmethod
     def create_requests(cls, day: Day):
@@ -279,46 +282,71 @@ class CalendarSync:
         """Synchronize Google Calendar with the Classeviva calendar."""
         await self.login()
 
-        self.__periods = self.__periods or await self.client.me.calendar.get_periods()
-        start_date = datetime(2023, 9, 1, tzinfo=tz)
-        end_date = date_to_datetime(self.__periods[-1].end)
+        async with self.__loop_lock:
+            self.__periods = (
+                self.__periods or await self.client.me.calendar.get_periods()
+            )
+            start_date = datetime(2023, 9, 1, tzinfo=tz)
+            end_date = date_to_datetime(self.__periods[-1].end)
 
-        days = await self.client.me.calendar.get_day(start_date, end_date)
-        days = sorted(filter(lambda x: x.agenda or x.notes, days), key=lambda x: x.date)
-        calendar = await self.google.get_events(start_date, end_date)
+            days = await self.client.me.calendar.get_day(start_date, end_date)
+            days = sorted(
+                filter(lambda x: x.agenda or x.notes, days), key=lambda x: x.date
+            )
+            calendar = await self.google.get_events(start_date, end_date)
+            old_calendar = shelve.open(SHELF_PATH)
+            if "items" not in old_calendar:
+                old_calendar["items"] = []
 
-        skipped = 0
-        edited = 0
-        added = 0
-        for day in days:
-            cday = self.filter_date(calendar, day.date)
-            reqs = self.create_requests(day)
+            skipped = 0
+            edited = 0
+            added = 0
+            for day in days:
+                cday = self.filter_date(calendar, day.date)
+                reqs = self.create_requests(day)
 
-            for req in reqs:
-                entries = list(
-                    filter(
-                        lambda e: e["summary"] == req["summary"]
-                        and gdate_to_datetime(self.get_calendar_date_value(e), False)
-                        == gdate_to_datetime(self.get_calendar_date_value(req), False),
-                        cday,
+                for req in reqs:
+                    entries = list(
+                        filter(
+                            lambda e: e["summary"] == req["summary"]
+                            and gdate_to_datetime(
+                                self.get_calendar_date_value(e), False
+                            )
+                            == gdate_to_datetime(
+                                self.get_calendar_date_value(req), False
+                            ),
+                            cday,
+                        )
                     )
-                )
-                if not entries:
-                    await self.google.add_event(req)
-                    added += 1
-                else:
-                    # TODO: add support for multiple entries, somehow
+                    if not entries:
+                        await self.google.add_event(req)
+                        added += 1
+                    elif old_calendar["items"]:
+                        # TODO: add support for multiple entries, somehow
 
-                    # NOTE: this can't be tested as of now
-                    # BUG: this is editing random events
-                    if entries[-1]["description"].strip() != req["description"].strip():
-                        diff = {k: v for k, v in req.items() if entries[0].get(k) != v}
-                        await self.google.patch_event(entries[0]["id"], diff)
-                        edited += 1
+                        for entry in entries:
+                            old = list(
+                                filter(
+                                    lambda en: en["iCalUID"] == entry["iCalUID"],
+                                    old_calendar["items"],
+                                )
+                            )[0]
+                            if (
+                                old["description"].strip()
+                                != entry["description"].strip()
+                            ):
+                                diff = {
+                                    k: v for k, v in entry.items() if old.get(k) != v
+                                }
+                                await self.google.patch_event(old["id"], diff)
+                                edited += 1
                     else:
                         skipped += 1
 
-                yield added, edited, skipped
+                    yield added, edited, skipped
+
+            old_calendar["items"] = calendar
+            old_calendar.close()
 
     async def background_loop(self):
         while True:
