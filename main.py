@@ -11,9 +11,9 @@ from datetime import datetime, date, timedelta
 from pytz import timezone
 from aiocvv import ClassevivaClient
 from aiocvv.dataclasses import Day
-from aiocvv.enums import NoteType, EventCode, SchoolDayStatus
+from aiocvv.enums import NoteType, EventCode
 from dotenv import load_dotenv
-from typing import Union
+from typing import Union, Optional, AsyncGenerator
 
 
 load_dotenv()
@@ -78,19 +78,22 @@ def create_requests(day: Day):
             end = {
                 "date": datetime_to_date(ev.end).isoformat(),
             }
+        else:
+            start = {
+                "dateTime": ev.start.isoformat(),
+                "timeZone": "Europe/Rome",
+            }
+            end = {
+                "dateTime": ev.end.isoformat(),
+                "timeZone": "Europe/Rome",
+            }
 
         events.append(
             {
                 "summary": f"{event_titles[ev.type]} {name}",
                 "description": ev.notes or "",
-                "start": start or {
-                    "dateTime": ev.start.isoformat(),
-                    "timeZone": "Europe/Rome",
-                },
-                "end": end or {
-                    "dateTime": ev.end.isoformat(),
-                    "timeZone": "Europe/Rome",
-                },
+                "start": start,
+                "end": end,
                 "reminders": {
                     "useDefault": False,
                     "overrides": [],
@@ -176,7 +179,9 @@ class GoogleCalendar:
             None, partial(build, "calendar", "v3", credentials=creds)
         )
 
-    async def get_events(self, start: DateOrDatetime, end: DateOrDatetime) -> list[dict]:
+    async def get_events(
+        self, start: DateOrDatetime, end: DateOrDatetime
+    ) -> list[dict]:
         if not self.service:
             self.service = await self.login()
 
@@ -210,56 +215,127 @@ class GoogleCalendar:
             )
             items += data["items"]
             cont = next != end
-        
+
         return items
 
     async def add_event(self, payload: dict):
         return await self.exec_insert("events", calendarId="primary", body=payload)
 
 
+class CalendarSync:
+    def __init__(self, username: str, password: str, identity: Optional[str] = None):
+        self.google = GoogleCalendar()
+        self.client = ClassevivaClient(
+            os.getenv("CVV_USERNAME"),
+            os.getenv("CVV_PASSWORD"),
+            os.getenv("CVV_IDENTITY"),
+        )
+        self.__sync_loop = None
+        self.__periods = None
+        self.__sleep = 1800  # 30 minutes
+
+    async def login(self):
+        if not self.client.me:
+            await self.client.login()
+
+        if not self.google.service:
+            await self.google.login()
+
+    async def sync(self) -> tuple[int, int]:
+        async for added, skipped in self.sync_iter():
+            pass
+
+        return added, skipped
+
+    async def sync_iter(self) -> AsyncGenerator[tuple[int, int], None]:
+        """Synchronize Google Calendar with the Classeviva calendar."""
+        await self.login()
+
+        self.__periods = self.__periods or await self.client.me.calendar.get_periods()
+        start_date = datetime(2023, 9, 1, tzinfo=tz)
+        end_date = date_to_datetime(self.__periods[-1].end)
+
+        days = await self.client.me.calendar.get_day(start_date, end_date)
+        days = sorted(filter(lambda x: x.agenda or x.notes, days), key=lambda x: x.date)
+        calendar = await self.google.get_events(start_date, end_date)
+
+        skipped = 0
+        added = 0
+        for day in days:
+            cday = filter_date(calendar, day.date)
+            reqs = create_requests(day)
+
+            for req in reqs:
+                # BUG: if something has been edited, a new one will be created in GCalendar
+                # also, if an event (not homework!) is edited, the edit won't be applied here
+                if not any(
+                    e["summary"] == req["summary"]
+                    and gdate_to_datetime(get_calendar_date_value(e))
+                    == gdate_to_datetime(get_calendar_date_value(req))
+                    for e in cday
+                ):
+                    await self.google.add_event(req)
+                    added += 1
+                else:
+                    skipped += 1
+
+                yield added, skipped
+
+    async def background_loop(self):
+        while True:
+            await self.on_loop_start()
+            async for added, skipped in self.sync_iter():
+                await self.on_data(added, skipped)
+
+            await self.on_loop_end(added, skipped)
+            await asyncio.sleep(self.__sleep)
+
+    def start(self):
+        self.__sync_loop = asyncio.create_task(self.background_loop())
+        return self.__sync_loop
+
+    def stop(self):
+        if self.__sync_loop:
+            self.__sync_loop.cancel()
+            self.__sync_loop = None
+
+    async def on_data(self, added, skipped):
+        pass
+
+    async def on_loop_start(self):
+        pass
+
+    async def on_loop_end(self, added, skipped):
+        pass
+
+
 async def main():
-    gc = GoogleCalendar()
-    client = ClassevivaClient(
+    syncer = CalendarSync(
         os.getenv("CVV_USERNAME"), os.getenv("CVV_PASSWORD"), os.getenv("CVV_IDENTITY")
     )
-    await client.login()
 
-    periods = await client.me.calendar.get_periods()
-    start_date = datetime(2023, 9, 1, tzinfo=tz)
-    end_date = date_to_datetime(periods[-1].end)
+    omsg = "Adding events..."
+    msg = omsg + " {a} added, {s} skipped"
 
-    days = await client.me.calendar.get_day(start_date, end_date)
-    days = sorted(days, key=lambda x: x.date)
-    calendar = await gc.get_events(start_date, end_date)
+    async def on_loop_start():
+        print(omsg, end="")
 
-    for day in days:
-        cday = filter_date(calendar, day.date)
-        reqs = create_requests(day)
+    async def on_data(added, skipped):
+        print("\r" + msg.format(a=added, s=skipped), end="")
 
-        if not reqs:
-            print(f"Day {day.date.isoformat()} has no events.\n\n")
-            continue
+    async def on_loop_end(added, skipped):
+        print("\nDone! Will sleep for 30 minutes.\n")
 
-        if not cday:
-            print("No events in GCalendar for this day.")
+    syncer.on_loop_start = on_loop_start
+    syncer.on_data = on_data
+    syncer.on_loop_end = on_loop_end
 
-        print(f"================ {day.date.isoformat()} ================")
-
-        for req in reqs:
-            # BUG: if something has been edited, a new one will be created in GCalendar
-            # also, if an event (not homework!) is edited, the edit won't be applied here
-            if not any(
-                e["summary"] == req["summary"]
-                and gdate_to_datetime(get_calendar_date_value(e))
-                == gdate_to_datetime(get_calendar_date_value(req))
-                for e in cday
-            ):
-                print(f"{req['summary']}\n{req['description']}\n")
-                await gc.add_event(req)
-            else:
-                print(f"Skipping {req['summary']}")
-
-        print("\n\n")
+    # awaiting because we want this program to run forever
+    print("Logging in...")
+    try:
+        await syncer.start()
+    except asyncio.CancelledError:
+        syncer.stop()
 
 
 if __name__ == "__main__":
