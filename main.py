@@ -21,105 +21,20 @@ DateOrDatetime = Union[date, datetime]
 tz = timezone("Europe/Rome")
 
 
-def date_to_datetime(date: DateOrDatetime) -> datetime:
+def date_to_datetime(date: DateOrDatetime, reset_hours=True) -> datetime:
+    if isinstance(date, datetime) and not reset_hours:
+        return date.astimezone(tz)
+
     return datetime(date.year, date.month, date.day, 0, 0, 0, 0, tzinfo=tz)
 
 
-def gdate_to_datetime(date: str) -> datetime:
+def gdate_to_datetime(date: str, reset_hours=True) -> datetime:
     try:
         ret = datetime.strptime(date, "%Y-%m-%dT%H:%M:%S%z")
     except ValueError:
         ret = datetime.strptime(date, "%Y-%m-%d")
 
-    return date_to_datetime(ret)
-
-
-def datetime_to_date(dt: datetime) -> str:
-    return date(dt.year, dt.month, dt.day)
-
-
-def get_calendar_date_value(ev: dict):
-    return ev["start"].get("dateTime", ev["start"].get("date"))
-
-
-def filter_date(resp: list[dict], date: DateOrDatetime) -> str:
-
-    return list(
-        filter(
-            lambda ev: "start" in ev
-            and datetime_to_date(gdate_to_datetime(get_calendar_date_value(ev)))
-            == datetime_to_date(date),
-            resp,
-        )
-    )
-
-
-def create_requests(day: Day):
-    events = []
-    note_titles = {
-        NoteType.teacher: "Annotazione",
-        NoteType.registry: "Nota disciplinare",
-        NoteType.warning: "Richiamo",
-        NoteType.sanction: "Sanzione disciplinare",
-    }
-    event_titles = {
-        EventCode.note: "Agenda -",
-        EventCode.homework: "Compiti di",
-        EventCode.reservation: "Prenotazione aula -",
-    }
-    for ev in day.agenda:
-        name = ev.subject.description if ev.subject else ev.author
-        start = None
-        end = None
-        if ev.full_day:
-            start = {
-                "date": datetime_to_date(ev.start).isoformat(),
-            }
-            end = {
-                "date": datetime_to_date(ev.end).isoformat(),
-            }
-        else:
-            start = {
-                "dateTime": ev.start.isoformat(),
-                "timeZone": "Europe/Rome",
-            }
-            end = {
-                "dateTime": ev.end.isoformat(),
-                "timeZone": "Europe/Rome",
-            }
-
-        events.append(
-            {
-                "summary": f"{event_titles[ev.type]} {name}",
-                "description": ev.notes or "",
-                "start": start,
-                "end": end,
-                "reminders": {
-                    "useDefault": False,
-                    "overrides": [],
-                },
-            }
-        )
-
-    for note in day.notes:
-        events.append(
-            {
-                "summary": f"{note_titles[note.type]} - {note.author_name}",
-                "description": note.text,
-                "start": {
-                    "date": note.date.isoformat(),
-                },
-                "end": {
-                    "date": note.date.isoformat(),
-                },
-                "reminders": {
-                    "useDefault": False,
-                    "overrides": [],
-                },
-            }
-        )
-
-    return events
+    return date_to_datetime(ret, reset_hours)
 
 
 class GoogleCalendar:
@@ -153,6 +68,22 @@ class GoogleCalendar:
         called = await self.call_service(method)
         insert = await self.call_on_func(called, "insert", *args, **kwargs)
         return await self.call_on_func(insert, "execute")
+
+    async def exec_patch(self, method, *args, **kwargs):
+        if not self.service:
+            self.service = await self.login()
+
+        called = await self.call_service(method)
+        patch = await self.call_on_func(called, "patch", *args, **kwargs)
+        return await self.call_on_func(patch, "execute")
+
+    async def exec_delete(self, method, *args, **kwargs):
+        if not self.service:
+            self.service = await self.login()
+
+        called = await self.call_service(method)
+        delete = await self.call_on_func(called, "delete", *args, **kwargs)
+        return await self.call_on_func(delete, "execute")
 
     async def login(self):
         scopes = ["https://www.googleapis.com/auth/calendar"]
@@ -200,7 +131,7 @@ class GoogleCalendar:
         )
         items = data["items"]
         cont = True
-        while len(items) % max == 0 and cont:
+        while items and len(items) % max == 0 and cont:
             next_ = items[-1]["start"]["dateTime"]
             next = gdate_to_datetime(next_).isoformat()
             items = list(filter(lambda x: x["start"]["dateTime"] != next_, items))
@@ -221,6 +152,14 @@ class GoogleCalendar:
     async def add_event(self, payload: dict):
         return await self.exec_insert("events", calendarId="primary", body=payload)
 
+    async def patch_event(self, event_id: str, payload: dict):
+        return await self.exec_patch(
+            "events", calendarId="primary", eventId=event_id, body=payload
+        )
+
+    async def delete_event(self, event_id: str):
+        return await self.exec_delete("events", calendarId="primary", eventId=event_id)
+
 
 class CalendarSync:
     def __init__(self, username: str, password: str, identity: Optional[str] = None):
@@ -234,6 +173,95 @@ class CalendarSync:
         self.__periods = None
         self.__sleep = 1800  # 30 minutes
 
+    @classmethod
+    def create_requests(cls, day: Day):
+        events = []
+        note_titles = {
+            NoteType.teacher: "Annotazione",
+            NoteType.registry: "Nota disciplinare",
+            NoteType.warning: "Richiamo",
+            NoteType.sanction: "Sanzione disciplinare",
+        }
+        event_titles = {
+            EventCode.note: "Agenda -",
+            EventCode.homework: "Compiti di",
+            EventCode.reservation: "Prenotazione aula -",
+        }
+        for ev in day.agenda:
+            name = ev.subject.description if ev.subject else ev.author
+            start = None
+            end = None
+            if ev.full_day:
+                start = {
+                    "date": cls.datetime_to_date(ev.start).isoformat(),
+                }
+                end = {
+                    "date": cls.datetime_to_date(ev.end).isoformat(),
+                }
+            else:
+                start = {
+                    "dateTime": ev.start.isoformat(),
+                    "timeZone": "Europe/Rome",
+                }
+                end = {
+                    "dateTime": ev.end.isoformat(),
+                    "timeZone": "Europe/Rome",
+                }
+
+            events.append(
+                {
+                    "summary": f"{event_titles[ev.type]} {name}",
+                    "description": ev.notes or "",
+                    "start": start,
+                    "end": end,
+                    "reminders": {
+                        "useDefault": False,
+                        "overrides": [],
+                    },
+                }
+            )
+
+        for note in day.notes:
+            events.append(
+                {
+                    "summary": f"{note_titles[note.type]} - {note.author_name}",
+                    "description": note.text,
+                    "start": {
+                        "date": note.date.isoformat(),
+                    },
+                    "end": {
+                        "date": note.date.isoformat(),
+                    },
+                    "reminders": {
+                        "useDefault": False,
+                        "overrides": [],
+                    },
+                }
+            )
+
+        return events
+
+    @staticmethod
+    def datetime_to_date(dt: datetime) -> str:
+        return date(dt.year, dt.month, dt.day)
+
+    @staticmethod
+    def get_calendar_date_value(ev: dict):
+        return ev["start"].get("dateTime", ev["start"].get("date"))
+
+    @classmethod
+    def filter_date(cls, resp: list[dict], date: DateOrDatetime) -> str:
+        return list(
+            filter(
+                lambda ev: "start" in ev
+                and cls.datetime_to_date(
+                    gdate_to_datetime(cls.get_calendar_date_value(ev))
+                )
+                == cls.datetime_to_date(date),
+                resp,
+            )
+        )
+
     async def login(self):
         if not self.client.me:
             await self.client.login()
@@ -242,12 +270,12 @@ class CalendarSync:
             await self.google.login()
 
     async def sync(self) -> tuple[int, int]:
-        async for added, skipped in self.sync_iter():
+        async for added, edited, skipped in self.sync_iter():
             pass
 
-        return added, skipped
+        return added, edited, skipped
 
-    async def sync_iter(self) -> AsyncGenerator[tuple[int, int], None]:
+    async def sync_iter(self) -> AsyncGenerator[tuple[int, int, int], None]:
         """Synchronize Google Calendar with the Classeviva calendar."""
         await self.login()
 
@@ -260,34 +288,45 @@ class CalendarSync:
         calendar = await self.google.get_events(start_date, end_date)
 
         skipped = 0
+        edited = 0
         added = 0
         for day in days:
-            cday = filter_date(calendar, day.date)
-            reqs = create_requests(day)
+            cday = self.filter_date(calendar, day.date)
+            reqs = self.create_requests(day)
 
             for req in reqs:
-                # BUG: if something has been edited, a new one will be created in GCalendar
-                # also, if an event (not homework!) is edited, the edit won't be applied here
-                if not any(
-                    e["summary"] == req["summary"]
-                    and gdate_to_datetime(get_calendar_date_value(e))
-                    == gdate_to_datetime(get_calendar_date_value(req))
-                    for e in cday
-                ):
+                entries = list(
+                    filter(
+                        lambda e: e["summary"] == req["summary"]
+                        and gdate_to_datetime(self.get_calendar_date_value(e), False)
+                        == gdate_to_datetime(self.get_calendar_date_value(req), False),
+                        cday,
+                    )
+                )
+                if not entries:
                     await self.google.add_event(req)
                     added += 1
                 else:
-                    skipped += 1
+                    # TODO: add support for multiple entries, somehow
 
-                yield added, skipped
+                    # NOTE: this can't be tested as of now
+                    # BUG: this is editing random events
+                    if entries[-1]["description"].strip() != req["description"].strip():
+                        diff = {k: v for k, v in req.items() if entries[0].get(k) != v}
+                        await self.google.patch_event(entries[0]["id"], diff)
+                        edited += 1
+                    else:
+                        skipped += 1
+
+                yield added, edited, skipped
 
     async def background_loop(self):
         while True:
             await self.on_loop_start()
-            async for added, skipped in self.sync_iter():
-                await self.on_data(added, skipped)
+            async for added, edited, skipped in self.sync_iter():
+                await self.on_data(added, edited, skipped)
 
-            await self.on_loop_end(added, skipped)
+            await self.on_loop_end(added, edited, skipped)
             await asyncio.sleep(self.__sleep)
 
     def start(self):
@@ -299,13 +338,13 @@ class CalendarSync:
             self.__sync_loop.cancel()
             self.__sync_loop = None
 
-    async def on_data(self, added, skipped):
+    async def on_data(self, added, edited, skipped):
         pass
 
     async def on_loop_start(self):
         pass
 
-    async def on_loop_end(self, added, skipped):
+    async def on_loop_end(self, added, edited, skipped):
         pass
 
 
@@ -315,15 +354,15 @@ async def main():
     )
 
     omsg = "Adding events..."
-    msg = omsg + " {a} added, {s} skipped"
+    msg = omsg + " {a} added, {e} edited, {s} skipped"
 
     async def on_loop_start():
         print(omsg, end="")
 
-    async def on_data(added, skipped):
-        print("\r" + msg.format(a=added, s=skipped), end="")
+    async def on_data(added, edited, skipped):
+        print("\r" + msg.format(a=added, e=edited, s=skipped), end="")
 
-    async def on_loop_end(added, skipped):
+    async def on_loop_end(added, edited, skipped):
         print("\nDone! Will sleep for 30 minutes.\n")
 
     syncer.on_loop_start = on_loop_start
