@@ -1,4 +1,3 @@
-import os
 import asyncio
 import shelve
 
@@ -7,7 +6,8 @@ from .utils import (
     date_to_datetime,
     DateOrDatetime,
     timezone,
-    SHELF_PATH,
+    get_shelf_path,
+    DESC_FOOTER
 )
 from .google import GoogleCalendar
 from datetime import datetime, date
@@ -29,13 +29,14 @@ class CalendarSync:
         token_path: str = "token.json",
         loop: asyncio.AbstractEventLoop = None,
     ):
-        self.google = GoogleCalendar(credentials_path, token_path)
+        self.loop = loop or asyncio.get_event_loop()
+        self.google = GoogleCalendar(credentials_path, token_path, loop)
         self.client = ClassevivaClient(
-            username, password, identity, loop=self.google.loop
+            username, password, identity, loop=loop
         )
         self.__sync_loop = None
         self.__periods = None
-        self.__sleep = sleep  # 30 minutes
+        self.__sleep = sleep
         self.__loop_lock = asyncio.Lock()
 
     @classmethod
@@ -76,7 +77,7 @@ class CalendarSync:
             events.append(
                 {
                     "summary": event_titles[ev.type].format(name),
-                    "description": ev.notes or "",
+                    "description": (ev.notes or "") + DESC_FOOTER,
                     "start": start,
                     "end": end,
                     "reminders": {
@@ -90,7 +91,7 @@ class CalendarSync:
             events.append(
                 {
                     "summary": f"{note_titles[note.type]} - {note.author_name}",
-                    "description": note.text,
+                    "description": note.text + DESC_FOOTER,
                     "start": {
                         "date": note.date.isoformat(),
                     },
@@ -156,10 +157,16 @@ class CalendarSync:
                 filter(lambda x: x.agenda or x.notes, days), key=lambda x: x.date
             )
             calendar = await self.google.get_events(start_date, end_date)
-            old_calendar = shelve.open(SHELF_PATH)
-            k = f"items-{self.client.me.identity}"
-            if k not in old_calendar:
-                old_calendar[k] = []
+            calendar = list(
+                filter(
+                    lambda ev: ev["description"].endswith(DESC_FOOTER),
+                    calendar,
+                )
+            )
+            old_calendar = shelve.open(get_shelf_path(self.client.me.identity))
+
+            if "items" not in old_calendar:
+                old_calendar["items"] = []
 
             skipped = 0
             deleted = 0
@@ -198,12 +205,12 @@ class CalendarSync:
                     elif not entries:
                         await self.google.add_event(req)
                         added += 1
-                    elif old_calendar[k]:
+                    elif old_calendar["items"]:
                         for entry in entries:
                             old = list(
                                 filter(
                                     lambda en: en["iCalUID"] == entry["iCalUID"],
-                                    old_calendar[k],
+                                    old_calendar["items"],
                                 )
                             )[0]
                             diff = {k: v for k, v in entry.items() if old.get(k) != v}
@@ -217,7 +224,7 @@ class CalendarSync:
 
                     yield added, edited, deleted, skipped
 
-            old_calendar[k] = calendar
+            old_calendar["items"] = calendar
             old_calendar.close()
 
     async def background_loop(self):

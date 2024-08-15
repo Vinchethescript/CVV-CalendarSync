@@ -1,6 +1,5 @@
 import os
 import asyncio
-import shelve
 
 from functools import partial
 from google.auth.transport.requests import Request

@@ -2,6 +2,8 @@
 
 A Python program that syncs your Classeviva calendar into your Google Calendar so you can have all your events and homeworks in one place.
 
+It uses the [`aiocvv`](https://github.com/Vinchethescript/aiocvv) library to fetch the events from Classeviva and the Google API to sync them into your Google Calendar.
+
 As of now, this is not ready to use as it's still in development, but you can still try it out if you want to. Just know that you may encounter lots of bugs and your calendar may be filled with duplicates.
 
 ## Installation

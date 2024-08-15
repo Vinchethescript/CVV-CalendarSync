@@ -6,8 +6,14 @@ from appdirs import user_cache_dir
 
 DateOrDatetime = Union[date, datetime]
 timezone = timezone_("Europe/Rome")
-SHELF_PATH = os.path.join(user_cache_dir(), "cvvsync.db")
+DESC_FOOTER = "\n\n[[Synced with cvvsync]]"
 
+def get_shelf_path(id: str) -> str:
+    dir = user_cache_dir("cvvsync")
+    if not os.path.exists(dir):
+        os.makedirs(dir)
+    
+    return os.path.join(dir, f"{id}.db")
 
 def date_to_datetime(date: DateOrDatetime, reset_hours=True) -> datetime:
     if isinstance(date, datetime) and not reset_hours:
