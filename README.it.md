@@ -6,6 +6,7 @@ Un programma Python che sincronizza il tuo calendario di Classeviva nel tuo Goog
 Utilizza la libreria [`aiocvv`](https://github.com/Vinchethescript/aiocvv) per ottenere note, eventi e compiti da Classeviva e l'API di Google per sincronizzarli nel tuo Google Calendar.
 
 ![Demo](demo.gif)
+###### *Nota che le prime due esecuzioni dopo la configurazione potrebbero essere buggate a causa di cache mancanti.*
 
 ## Installazione e utilizzo
 > **Nota**: Questo programma funziona con Python 3.8 o più nuove.
