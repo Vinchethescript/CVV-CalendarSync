@@ -155,7 +155,8 @@ class CalendarSync:
                 start_date = date.today()
                 if get_boolean_env("FULL_YEAR"):
                     start_date = self.__periods[0].start
-
+                
+                start_date = date_to_datetime(start_date)
                 end_date = date_to_datetime(self.__periods[-1].end)
 
                 days = await self.client.me.calendar.get_day(start_date, end_date)
@@ -220,7 +221,11 @@ class CalendarSync:
                                         lambda en: en["iCalUID"] == entry["iCalUID"],
                                         old_calendar["items"],
                                     )
-                                )[0]
+                                )
+                                if not old:
+                                    continue
+
+                                old = old[0]
                                 diff = {
                                     k: v for k, v in entry.items() if old.get(k) != v
                                 }

@@ -1,9 +1,11 @@
 # CVV-CalendarSync
+[![README in inglese](https://img.shields.io/badge/README-in_inglese-000052)](README.md)
+
 Un programma Python che sincronizza il tuo calendario di Classeviva nel tuo Google Calendar in modo da avere tutti i tuoi eventi e compiti in un unico posto.
 
 Utilizza la libreria [`aiocvv`](https://github.com/Vinchethescript/aiocvv) per ottenere note, eventi e compiti da Classeviva e l'API di Google per sincronizzarli nel tuo Google Calendar.
 
-[![README in inglese](https://img.shields.io/badge/README-in_inglese-000052)](README.md)
+![Demo](demo.gif)
 
 ## Installazione e utilizzo
 1. Clona il repository;
@@ -12,7 +14,7 @@ Utilizza la libreria [`aiocvv`](https://github.com/Vinchethescript/aiocvv) per o
 5. Copia il file `example.env` in `.env` e imposta le credenziali per Classeviva;
 6. Per eseguirlo, esegui il file `main.py` con il tuo interpreter Python preferito;
 7. Se lo stai eseguendo per la prima volta, ti verrà chiesto di autenticarti con Google e Classeviva. Segui le istruzioni sul terminale;
-8. Buon divertimento!
+8. Controlla il tuo calendario!
 
 Semplice, no?
 

@@ -1,10 +1,11 @@
 # CVV-CalendarSync
+[![README in Italian](https://img.shields.io/badge/README-in_Italian-184718)](README.it.md)
 
 A Python program that syncs your Classeviva calendar into your Google Calendar so you can have all your events and homeworks in one place.
 
 It uses the [`aiocvv`](https://github.com/Vinchethescript/aiocvv) library to fetch the events from Classeviva and the Google API to sync them into your Google Calendar.
 
-[![README in Italian](https://img.shields.io/badge/README-in_Italian-184718)](README.it.md)
+![Demo](demo.gif)
 
 ## Installation and usage
 1. Clone the repository;
@@ -13,7 +14,7 @@ It uses the [`aiocvv`](https://github.com/Vinchethescript/aiocvv) library to fet
 5. Copy the `example.env` file to `.env` and set the credentials for Classeviva;
 6. To run it, simply run the `main.py` file with your favorite Python interpreter;
 7. If running for the first time, you will be prompted to authenticate with Google and Classeviva. Follow the instructions on the terminal;
-8. Enjoy!
+8. Check your calendar and enjoy!
 
 Simple as that, isn't it?
 
