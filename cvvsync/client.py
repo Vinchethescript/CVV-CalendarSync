@@ -175,7 +175,8 @@ class CalendarSync:
                 deleted = 0
                 edited = 0
                 added = 0
-                all = 0
+                all = len([d for day in days for d in (day.notes + day.agenda)])
+
                 for day in days:
                     cday = self.filter_date(calendar, day.date)
                     reqs = self.create_requests(day)
@@ -220,7 +221,7 @@ class CalendarSync:
                                 diff = {
                                     k: v for k, v in entry.items() if old.get(k) != v
                                 }
-                                
+
                                 if diff:
                                     await self.google.patch_event(old["id"], diff)
                                     edited += 1
@@ -229,6 +230,7 @@ class CalendarSync:
                         else:
                             skipped += 1
 
+                        all += (len(entries) - 1) if len(entries) >= 1 else 0
                         yield added, edited, deleted, skipped, all
 
                 old_calendar["items"] = calendar
@@ -249,7 +251,9 @@ class CalendarSync:
                 await self.on_data(added, edited, deleted, skipped, all)
 
             tasks.append(
-                self.loop.create_task(self.on_loop_end(added, edited, deleted, skipped, all))
+                self.loop.create_task(
+                    self.on_loop_end(added, edited, deleted, skipped, all)
+                )
             )
             _, p = await asyncio.wait(
                 [self.loop.create_task(asyncio.sleep(self.__sleep)), *tasks],

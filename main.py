@@ -7,7 +7,29 @@ from aiocvv import ClassevivaClient
 
 load_dotenv()
 
-msg = "{a} added, {e} edited, {d} deleted, {s} already added. Total: {sum}/{t}"
+
+def get_msg(added, edited, deleted, skipped, all):
+    p = lambda n: (n / all) * 100 if all else 0
+    can = all != "?"
+    s = added + edited + deleted + skipped
+    pc = f" ({p(s):.2f}%)" if can else ""
+
+    if added and can:
+        added = f"{added} ({p(added):.2f}%)"
+
+    if edited and can:
+        edited = f"{edited} ({p(edited):.2f}%)"
+
+    if deleted and can:
+        deleted = f"{deleted} ({p(deleted):.2f}%)"
+
+    if skipped and can:
+        skipped = f"{skipped} ({p(skipped):.2f}%)"
+
+    return (
+        f"{added} added, {edited} edited, {deleted} deleted, "
+        f"{skipped} skipped. Total: {s}/{all}{pc}"
+    )
 
 
 async def on_login(client: ClassevivaClient):
@@ -16,12 +38,11 @@ async def on_login(client: ClassevivaClient):
 
 async def on_loop_start():
     print("Adding events...")
-    print(msg.format(a=0, e=0, d=0, s=0, sum="?", t="?"), end="", flush=True)
+    print(get_msg(0, 0, 0, 0, "?"), end="", flush=True)
 
 
 async def on_data(added, edited, deleted, skipped, all):
-    s = added + edited + deleted + skipped
-    print("\r" + msg.format(a=added, e=edited, d=deleted, s=skipped, sum=s, t=all), end="")
+    print("\r" + get_msg(added, edited, deleted, skipped, all), end="")
 
 
 async def on_loop_end(added, edited, deleted, skipped, all):
