@@ -8,6 +8,7 @@ Utilizza la libreria [`aiocvv`](https://github.com/Vinchethescript/aiocvv) per o
 ![Demo](demo.gif)
 
 ## Installazione e utilizzo
+> **Nota**: Questo programma funziona con Python 3.8 o più nuove.
 1. Clona il repository;
 2. Installa i pacchetti richiesti con `pip install -Ur requirements.txt`;
 3. [Crea un nuovo progetto sulla Google Cloud Platform](https://developers.google.com/calendar/api/quickstart/python) e scarica il file `credentials.json` nella root del repository;

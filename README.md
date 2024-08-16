@@ -8,6 +8,7 @@ It uses the [`aiocvv`](https://github.com/Vinchethescript/aiocvv) library to fet
 ![Demo](demo.gif)
 
 ## Installation and usage
+> **Note**: This program works with Python 3.8 or higher.
 1. Clone the repository;
 2. Install the required packages with `pip install -Ur requirements.txt`;
 3. [Setup a new project on the Google Cloud Platform](https://developers.google.com/calendar/api/quickstart/python) and download the `credentials.json` file to the root of the repository;
