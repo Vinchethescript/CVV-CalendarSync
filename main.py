@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 from dotenv import load_dotenv
 from cvvsync import CalendarSync
@@ -55,6 +56,34 @@ async def on_error(exc):
 
 
 async def main():
+    # PM2 compatibility
+    if os.getenv("PM2_HOME") and os.path.exists(".git"):
+
+        async def get_version() -> str:
+            vers = await asyncio.create_subprocess_shell(
+                'git log -1 --format="%h" --abbrev=7 | xargs',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            o, e = await vers.communicate()
+            o, e = o.decode().strip(), e.decode().strip()
+            if e:
+                print(e)
+                return
+
+            return o
+
+        def upd_version(version: str):
+            data = {"version": version}
+            with open("package.json", "w") as f:
+                json.dump(data, f, indent=2)
+
+        v = await get_version()
+        if not os.path.exists("package.json"):
+            upd_version(v)
+        elif json.load(open("package.json"))["version"] != v:
+            upd_version(v)
+
     syncer = CalendarSync(
         os.getenv("CVV_USERNAME"), os.getenv("CVV_PASSWORD"), os.getenv("CVV_IDENTITY")
     )

@@ -5,7 +5,7 @@ from .utils import (
     gdate_to_datetime,
     date_to_datetime,
     DateOrDatetime,
-    timezone,
+    get_boolean_env,
     get_shelf_path,
     DESC_FOOTER,
 )
@@ -152,7 +152,10 @@ class CalendarSync:
                 self.__periods = (
                     self.__periods or await self.client.me.calendar.get_periods()
                 )
-                start_date = datetime(2023, 9, 1, tzinfo=timezone)
+                start_date = date.today()
+                if get_boolean_env("FULL_YEAR"):
+                    start_date = self.__periods[0].start
+
                 end_date = date_to_datetime(self.__periods[-1].end)
 
                 days = await self.client.me.calendar.get_day(start_date, end_date)
