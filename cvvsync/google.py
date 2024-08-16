@@ -6,7 +6,6 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build, Resource
-from googleapiclient.errors import HttpError
 from pytz import timezone
 from .utils import gdate_to_datetime, date_to_datetime, DateOrDatetime, timezone
 
